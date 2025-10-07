@@ -1,4 +1,4 @@
-# Build derivation - only runs if inputs change
+# Build derivation - extracts pre-built GStreamer Android binaries
 { pkgs, config, androidComposition, gstreamerSource }:
 
 pkgs.stdenv.mkDerivation {
@@ -7,121 +7,190 @@ pkgs.stdenv.mkDerivation {
 
   src = gstreamerSource;
 
-  # Minimal build inputs to speed up evaluation
+  # Minimal build inputs
   nativeBuildInputs = with pkgs; [
-    jdk17
-    which
     file
     findutils
-  ] ++ [ androidComposition.androidsdk ];
+  ];
 
-  # Quick unpack
+  # Don't use standard build phases
+  dontConfigure = true;
+  dontBuild = true;
+
   unpackPhase = ''
+    runHook preUnpack
+    
     echo "📦 Extracting GStreamer ${config.gstreamerVersion}..."
-    mkdir -p gstreamer_android
-    tar -xf $src -C gstreamer_android/
+    mkdir -p extracted
+    tar -xf $src -C extracted --strip-components=1
+    
+    echo "=== Extracted directory structure ==="
+    ls -la extracted/
+    find extracted/ -maxdepth 2 -type d
+    
+    runHook postUnpack
   '';
 
-  # Configure Android environment
-  configurePhase = ''
-    echo "🔧 Configuring Android NDK..."
-
-    export ANDROID_SDK_ROOT="${androidComposition.androidsdk}/libexec/android-sdk"
-    export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk-bundle"
-    export NDK_ROOT="$ANDROID_NDK_HOME"
-
-    # Find NDK r25c directory
-    if [ ! -d "$ANDROID_NDK_HOME" ]; then
-      NDK_DIR=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d -name "25.2.*" | head -1)
-      if [ -n "$NDK_DIR" ]; then
-        export ANDROID_NDK_HOME="$NDK_DIR"
-        export NDK_ROOT="$NDK_DIR"
-      fi
-    fi
-
-    echo "✓ Using NDK: $ANDROID_NDK_HOME"
-
-    export GSTREAMER_ROOT_ANDROID="$PWD/gstreamer_android"
-    export TARGET_ARCH_ABI="${config.targetAbi}"
-
-    mkdir -p gstreamer
-    cp -r gstreamer_android/* gstreamer/
-
-    # Verify ndk-build exists
-    if [ ! -f "$ANDROID_NDK_HOME/ndk-build" ]; then
-      echo "❌ ERROR: ndk-build not found at $ANDROID_NDK_HOME"
-      exit 1
-    fi
-  '';
-
-  # Build phase
-  buildPhase = ''
-    echo "🔨 Building for ${config.targetAbi}..."
-
-    cd gstreamer
-    export NDK_PROJECT_PATH="$PWD"
-
-    $ANDROID_NDK_HOME/ndk-build \
-      APP_ABI=${config.targetAbi} \
-      APP_PLATFORM=${config.androidPlatform} \
-      V=1
-  '';
-
-  # Install artifacts
   installPhase = ''
-    echo "📦 Packaging artifacts..."
+    runHook preInstall
+    
+    echo "📦 Packaging artifacts for ${config.targetAbi}..."
     mkdir -p $out/artifacts
-
-    # Copy libc++_shared.so (NDK r25c location)
-    LIBCPP_PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
-
-    if [ -f "$LIBCPP_PATH" ]; then
-      cp "$LIBCPP_PATH" $out/artifacts/
-      echo "✓ libc++_shared.so"
+    
+    # Navigate to extracted directory
+    cd extracted
+    
+    # Find the correct ABI directory
+    ABI_DIR=""
+    
+    # Try common locations
+    if [ -d "${config.targetAbi}" ]; then
+      ABI_DIR="${config.targetAbi}"
+      echo "✓ Found ABI directory: ${config.targetAbi}"
+    elif [ -d "armv8" ] && [ "${config.targetAbi}" = "arm64-v8a" ]; then
+      ABI_DIR="armv8"
+      echo "✓ Found ABI directory: armv8"
     else
-      # Fallback search
-      ALT_PATH=$(find $ANDROID_NDK_HOME -name "libc++_shared.so" -path "*/${config.targetAbi}*" -o -path "*/aarch64-linux-android/*" | head -1)
-      if [ -n "$ALT_PATH" ]; then
-        cp "$ALT_PATH" $out/artifacts/
-        echo "✓ libc++_shared.so (from $ALT_PATH)"
+      echo "⚠ Searching for ${config.targetAbi} directory..."
+      ABI_DIR=$(find . -maxdepth 1 -type d -name "*arm64*" -o -name "*v8a*" -o -name "armv8" | head -1)
+      if [ -n "$ABI_DIR" ]; then
+        echo "✓ Found directory: $ABI_DIR"
       fi
     fi
-
-    # Copy libgstreamer_android.so
-    if [ -f "libs/${config.targetAbi}/libgstreamer_android.so" ]; then
-      cp libs/${config.targetAbi}/libgstreamer_android.so $out/artifacts/
-      echo "✓ libgstreamer_android.so"
-    else
-      echo "❌ ERROR: libgstreamer_android.so not found"
+    
+    if [ -z "$ABI_DIR" ]; then
+      echo "❌ ERROR: Could not find ABI directory for ${config.targetAbi}"
+      echo "Available directories:"
+      ls -la
       exit 1
     fi
-
-    # Create checksums
+    
+    # Copy GStreamer libraries
+    echo "🔍 Searching for GStreamer libraries..."
+    
+    # Try different possible locations
+    if [ -d "$ABI_DIR/lib" ]; then
+      echo "✓ Found lib directory: $ABI_DIR/lib"
+      
+      # Copy libgstreamer_android.so if it exists
+      if [ -f "$ABI_DIR/lib/libgstreamer_android.so" ]; then
+        cp -v "$ABI_DIR/lib/libgstreamer_android.so" $out/artifacts/
+        echo "✓ Copied libgstreamer_android.so"
+      fi
+      
+      # Copy all .so files (in case they're needed)
+      find "$ABI_DIR/lib" -name "*.so" -type f -exec cp -v {} $out/artifacts/ \; 2>/dev/null || true
+      
+    else
+      echo "⚠ No lib directory, searching for .so files..."
+      find "$ABI_DIR" -name "*.so" -type f -exec cp -v {} $out/artifacts/ \;
+    fi
+    
+    # Copy libc++_shared.so from NDK
+    echo "🔍 Searching for libc++_shared.so..."
+    
+    ANDROID_SDK_ROOT="${androidComposition.androidsdk}/libexec/android-sdk"
+    
+    # Try to find NDK
+    NDK_DIR=""
+    if [ -d "$ANDROID_SDK_ROOT/ndk-bundle" ]; then
+      NDK_DIR="$ANDROID_SDK_ROOT/ndk-bundle"
+    else
+      NDK_DIR=$(find "$ANDROID_SDK_ROOT/ndk" -maxdepth 1 -type d -name "25.*" 2>/dev/null | head -1)
+    fi
+    
+    if [ -n "$NDK_DIR" ]; then
+      echo "✓ Using NDK: $NDK_DIR"
+      
+      # Find libc++_shared.so
+      LIBCPP=$(find "$NDK_DIR" -name "libc++_shared.so" \
+        KATEX_INLINE_OPEN -path "*/aarch64-linux-android/*" -o -path "*/${config.targetAbi}/*" KATEX_INLINE_CLOSE \
+        | head -1)
+      
+      if [ -n "$LIBCPP" ]; then
+        cp -v "$LIBCPP" $out/artifacts/
+        echo "✓ Copied libc++_shared.so from NDK"
+      else
+        echo "⚠ libc++_shared.so not found in NDK (may not be needed)"
+      fi
+    else
+      echo "⚠ NDK not found, skipping libc++_shared.so"
+    fi
+    
+    # Verify we have at least some libraries
     cd $out/artifacts
-    sha256sum *.so > checksums.txt 2>/dev/null || true
-
+    SO_COUNT=$(ls -1 *.so 2>/dev/null | wc -l)
+    
+    if [ "$SO_COUNT" -eq 0 ]; then
+      echo "❌ ERROR: No .so files were copied!"
+      echo "=== Debug Info ==="
+      echo "Source structure:"
+      cd -
+      find extracted/ -name "*.so" | head -20
+      exit 1
+    fi
+    
+    echo "✅ Found $SO_COUNT library file(s)"
+    
+    # Generate checksums
+    cd $out/artifacts
+    sha256sum *.so > checksums.txt
+    
     # Create README
     cat > README.md << EOF
 # GStreamer Android ${config.gstreamerVersion}
 
-Built with NDK r25c for ${config.targetAbi}
+Pre-built GStreamer libraries for Android.
 
-## Files:
-- libgstreamer_android.so - GStreamer JNI wrapper
-- libc++_shared.so - C++ standard library
+## Build Information
+- **GStreamer Version:** ${config.gstreamerVersion}
+- **Target ABI:** ${config.targetAbi}
+- **Android Platform:** ${config.androidPlatform}
+- **NDK Version:** r25c (25.2.9519653)
 
-## Build Info:
-- GStreamer: ${config.gstreamerVersion}
-- NDK: r25c (25.2.9519653)
-- Target ABI: ${config.targetAbi}
-- Platform: ${config.androidPlatform}
+## Files
 
-## Usage:
-Copy to: app/src/main/jniLibs/${config.targetAbi}/
+\`\`\`
+$(ls -lh *.so)
+\`\`\`
+
+## Installation
+
+Copy these libraries to your Android project:
+
+\`\`\`bash
+# Copy to your Android project
+cp *.so /path/to/your/app/src/main/jniLibs/${config.targetAbi}/
+\`\`\`
+
+## Checksums
+
+See \`checksums.txt\` for SHA256 hashes of all libraries.
+
+## Usage in Android
+
+Add to your \`build.gradle\`:
+
+\`\`\`gradle
+android {
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+}
+\`\`\`
+
 EOF
-
-    echo "✅ Build complete!"
+    
+    echo ""
+    echo "=== ✅ Build Complete ==="
+    echo "Artifacts location: $out/artifacts"
+    echo ""
     ls -lh
+    echo ""
+    
+    runHook postInstall
   '';
 
   # Passthru for debugging
@@ -132,7 +201,9 @@ EOF
 
   # Metadata
   meta = with pkgs.lib; {
-    description = "GStreamer Android JNI wrapper (${config.targetAbi}) built with NDK r25c";
-    platforms = platforms.linux;
+    description = "GStreamer Android pre-built libraries (${config.targetAbi})";
+    homepage = "https://gstreamer.freedesktop.org/";
+    license = pkgs.lib.licenses.lgpl2Plus;
+    platforms = pkgs.lib.platforms.linux;
   };
 }
