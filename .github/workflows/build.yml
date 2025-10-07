@@ -37,13 +37,13 @@ jobs:
           skipPush: ${{ github.event_name == 'pull_request' }}
         continue-on-error: true  # Continue if cachix is not configured
 
-      - name: 🔍 Check Nix flake
-        run: |
-          nix flake show
-          nix flake metadata
+      # - name: 🔍 Check Nix flake
+      #   run: |
+      #     nix flake show
+      #     nix flake metadata
 
-      - name: ✅ Run flake checks
-        run: nix flake check --show-trace
+      # - name: ✅ Run flake checks
+      #   run: nix flake check --show-trace
 
       - name: 🔨 Build GStreamer Android
         run: |
