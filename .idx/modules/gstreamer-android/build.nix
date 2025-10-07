@@ -26,7 +26,9 @@ pkgs.stdenv.mkDerivation {
     
     echo "=== Extracted directory structure ==="
     ls -la extracted/
-    find extracted/ -maxdepth 2 -type d
+    
+    echo "=== Lib directory contents ==="
+    ls -la extracted/lib/ 2>/dev/null || echo "No lib directory"
     
     runHook postUnpack
   '';
@@ -37,57 +39,40 @@ pkgs.stdenv.mkDerivation {
     echo "📦 Packaging artifacts for ${config.targetAbi}..."
     mkdir -p $out/artifacts
     
-    # Navigate to extracted directory
     cd extracted
     
-    # Find the correct ABI directory
-    ABI_DIR=""
+    # The universal tarball contains libs in lib/ directory
+    # Check if there are ABI-specific subdirectories or if all libs are together
     
-    # Try common locations
-    if [ -d "${config.targetAbi}" ]; then
-      ABI_DIR="${config.targetAbi}"
-      echo "✓ Found ABI directory: ${config.targetAbi}"
-    elif [ -d "armv8" ] && [ "${config.targetAbi}" = "arm64-v8a" ]; then
-      ABI_DIR="armv8"
-      echo "✓ Found ABI directory: armv8"
-    else
-      echo "⚠ Searching for ${config.targetAbi} directory..."
-      ABI_DIR=$(find . -maxdepth 1 -type d -name "*arm64*" -o -name "*v8a*" -o -name "armv8" | head -1)
-      if [ -n "$ABI_DIR" ]; then
-        echo "✓ Found directory: $ABI_DIR"
-      fi
-    fi
-    
-    if [ -z "$ABI_DIR" ]; then
-      echo "❌ ERROR: Could not find ABI directory for ${config.targetAbi}"
-      echo "Available directories:"
-      ls -la
-      exit 1
-    fi
-    
-    # Copy GStreamer libraries
-    echo "🔍 Searching for GStreamer libraries..."
-    
-    # Try different possible locations
-    if [ -d "$ABI_DIR/lib" ]; then
-      echo "✓ Found lib directory: $ABI_DIR/lib"
+    if [ -d "lib/${config.targetAbi}" ]; then
+      # Structure: lib/arm64-v8a/*.so
+      echo "✓ Found lib/${config.targetAbi}/ directory"
+      find "lib/${config.targetAbi}" -name "*.so" -type f -exec cp -v {} $out/artifacts/ \;
       
-      # Copy libgstreamer_android.so if it exists
-      if [ -f "$ABI_DIR/lib/libgstreamer_android.so" ]; then
-        cp -v "$ABI_DIR/lib/libgstreamer_android.so" $out/artifacts/
-        echo "✓ Copied libgstreamer_android.so"
-      fi
+    elif [ -d "lib/gstreamer-1.0" ]; then
+      # Structure: lib/gstreamer-1.0/*.so (and lib/*.so)
+      echo "✓ Found GStreamer plugin directory"
       
-      # Copy all .so files (in case they're needed)
-      find "$ABI_DIR/lib" -name "*.so" -type f -exec cp -v {} $out/artifacts/ \; 2>/dev/null || true
+      # Copy main libraries from lib/
+      find lib -maxdepth 1 -name "*.so" -type f -exec cp -v {} $out/artifacts/ \;
+      
+      # Copy plugins from lib/gstreamer-1.0/
+      find lib/gstreamer-1.0 -name "*.so" -type f -exec cp -v {} $out/artifacts/ \;
       
     else
-      echo "⚠ No lib directory, searching for .so files..."
-      find "$ABI_DIR" -name "*.so" -type f -exec cp -v {} $out/artifacts/ \;
+      # Fallback: copy all .so files from lib/
+      echo "⚠ Using fallback: copying all .so files from lib/"
+      find lib -name "*.so" -type f -exec cp -v {} $out/artifacts/ \;
+    fi
+    
+    # Also check for libgstreamer_android.so in other locations
+    if [ -f "lib/libgstreamer_android.so" ]; then
+      cp -v lib/libgstreamer_android.so $out/artifacts/
     fi
     
     # Copy libc++_shared.so from NDK
-    echo "🔍 Searching for libc++_shared.so..."
+    echo ""
+    echo "🔍 Searching for libc++_shared.so in NDK..."
     
     ANDROID_SDK_ROOT="${androidComposition.androidsdk}/libexec/android-sdk"
     
@@ -102,56 +87,69 @@ pkgs.stdenv.mkDerivation {
     if [ -n "$NDK_DIR" ]; then
       echo "✓ Using NDK: $NDK_DIR"
       
-      # Find libc++_shared.so
+      # Find libc++_shared.so for our target ABI
       LIBCPP=$(find "$NDK_DIR" -name "libc++_shared.so" \
         KATEX_INLINE_OPEN -path "*/aarch64-linux-android/*" -o -path "*/${config.targetAbi}/*" KATEX_INLINE_CLOSE \
-        | head -1)
+        -type f | head -1)
       
       if [ -n "$LIBCPP" ]; then
         cp -v "$LIBCPP" $out/artifacts/
         echo "✓ Copied libc++_shared.so from NDK"
       else
-        echo "⚠ libc++_shared.so not found in NDK (may not be needed)"
+        echo "⚠ libc++_shared.so not found in NDK (continuing anyway)"
       fi
     else
       echo "⚠ NDK not found, skipping libc++_shared.so"
     fi
     
-    # Verify we have at least some libraries
+    # Verify we have libraries
     cd $out/artifacts
     SO_COUNT=$(ls -1 *.so 2>/dev/null | wc -l)
     
     if [ "$SO_COUNT" -eq 0 ]; then
+      echo ""
       echo "❌ ERROR: No .so files were copied!"
+      echo ""
       echo "=== Debug Info ==="
-      echo "Source structure:"
-      cd -
-      find extracted/ -name "*.so" | head -20
+      echo "Searching for all .so files in extracted archive:"
+      cd ../extracted
+      find . -name "*.so" -type f | head -30
+      echo ""
+      echo "Directory structure:"
+      find . -type d -maxdepth 3
       exit 1
     fi
     
-    echo "✅ Found $SO_COUNT library file(s)"
+    echo ""
+    echo "✅ Successfully copied $SO_COUNT library file(s)"
+    echo ""
     
     # Generate checksums
     cd $out/artifacts
     sha256sum *.so > checksums.txt
     
+    # Show what we got
+    echo "=== Libraries ==="
+    ls -lh *.so | head -20
+    
     # Create README
     cat > README.md << EOF
 # GStreamer Android ${config.gstreamerVersion}
 
-Pre-built GStreamer libraries for Android.
+Pre-built GStreamer libraries for Android ${config.targetAbi}.
 
 ## Build Information
+
 - **GStreamer Version:** ${config.gstreamerVersion}
 - **Target ABI:** ${config.targetAbi}
 - **Android Platform:** ${config.androidPlatform}
 - **NDK Version:** r25c (25.2.9519653)
+- **Library Count:** $SO_COUNT files
 
 ## Files
 
 \`\`\`
-$(ls -lh *.so)
+$(ls -lh *.so | awk '{print $9, $5}')
 \`\`\`
 
 ## Installation
@@ -159,20 +157,26 @@ $(ls -lh *.so)
 Copy these libraries to your Android project:
 
 \`\`\`bash
-# Copy to your Android project
+# Copy all libraries to your project
 cp *.so /path/to/your/app/src/main/jniLibs/${config.targetAbi}/
+
+# Or create the directory structure
+mkdir -p app/src/main/jniLibs/${config.targetAbi}
+cp *.so app/src/main/jniLibs/${config.targetAbi}/
 \`\`\`
 
-## Checksums
+## Android Project Setup
 
-See \`checksums.txt\` for SHA256 hashes of all libraries.
-
-## Usage in Android
-
-Add to your \`build.gradle\`:
+Add to your \`app/build.gradle\`:
 
 \`\`\`gradle
 android {
+    defaultConfig {
+        ndk {
+            abiFilters '${config.targetAbi}'
+        }
+    }
+    
     sourceSets {
         main {
             jniLibs.srcDirs = ['src/main/jniLibs']
@@ -181,13 +185,20 @@ android {
 }
 \`\`\`
 
+## Checksums
+
+See \`checksums.txt\` for SHA256 hashes of all libraries.
+
+## License
+
+GStreamer is licensed under LGPL v2+. See individual library licenses in the GStreamer documentation.
+
 EOF
     
     echo ""
     echo "=== ✅ Build Complete ==="
-    echo "Artifacts location: $out/artifacts"
-    echo ""
-    ls -lh
+    echo "Artifacts: $out/artifacts"
+    echo "Total libraries: $SO_COUNT"
     echo ""
     
     runHook postInstall
