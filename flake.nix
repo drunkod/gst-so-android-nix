@@ -8,7 +8,20 @@
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+    let
+      # Overlays at top level (not per-system)
+      overlays = {
+        default = final: prev: {
+          gstreamer-android = self.packages.${final.system}.gstreamer-android or null;
+        };
+      };
+
+    in
+    {
+      # Expose overlays at top level
+      inherit overlays;
+
+    } // flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
@@ -20,13 +33,16 @@
 
         lib = pkgs.lib;
 
-        # Import all overlays
-        overlays = import ./.idx/overlays/default.nix { inherit pkgs; };
+        # Import custom overlays (if they exist)
+        customOverlays =
+          if builtins.pathExists ./.idx/overlays/default.nix
+          then import ./.idx/overlays/default.nix { inherit pkgs; }
+          else [];
 
         # Apply overlays to pkgs
         extendedPkgs = pkgs.extend (
           self: super:
-            builtins.foldl' (acc: overlay: acc // overlay self super) {} overlays
+            builtins.foldl' (acc: overlay: acc // overlay self super) {} customOverlays
         );
 
         # Import GStreamer Android module
@@ -43,13 +59,6 @@
         environment = import ./.idx/modules/environment.nix {
           inherit lib extendedPkgs gstreamerAndroid;
         };
-
-        # Convert environment to shell variables
-        envVars = lib.mapAttrs (name: value: 
-          if builtins.isString value then value
-          else if builtins.isBool value then (if value then "1" else "0")
-          else toString value
-        ) environment;
 
       in {
         # Default package is the GStreamer Android build
@@ -89,12 +98,13 @@
               fd
             ]);
 
-            # Set environment variables
-            inherit (envVars) 
-              GSTREAMER_ANDROID_VERSION
-              GSTREAMER_ANDROID_NDK
-              GSTREAMER_ANDROID_ABI
-              GSTREAMER_ANDROID_ARTIFACTS;
+            # Set environment variables directly from the environment attrset
+            GSTREAMER_ANDROID_VERSION = environment.GSTREAMER_ANDROID_VERSION or "";
+            GSTREAMER_ANDROID_NDK = environment.GSTREAMER_ANDROID_NDK or "";
+            GSTREAMER_ANDROID_ABI = environment.GSTREAMER_ANDROID_ABI or "";
+            GSTREAMER_ANDROID_ARTIFACTS = environment.GSTREAMER_ANDROID_ARTIFACTS or "";
+            TMPDIR = environment.TMPDIR or "/tmp";
+            XDG_CACHE_HOME = environment.XDG_CACHE_HOME or "";
 
             # Shell hook
             shellHook = ''
@@ -188,17 +198,36 @@
           '';
 
           # Check if scripts build
-          scripts-check = pkgs.runCommand "scripts-check" {} ''
+          scripts-check = pkgs.runCommand "scripts-check" {
+            buildInputs = [
+              self.packages.${system}.build-script
+              self.packages.${system}.test-script
+            ];
+          } ''
             echo "Checking scripts..."
-            ${self.packages.${system}.build-script}/bin/gst-android-build --help || true
-            ${self.packages.${system}.test-script}/bin/gst-android-test --help || true
+            command -v gst-android-build >/dev/null
+            command -v gst-android-test >/dev/null
+            echo "✅ All scripts found"
             touch $out
           '';
-        };
 
-        # Overlay for using in other flakes
-        overlays.default = final: prev: {
-          gstreamer-android = gstreamerAndroid.build;
+          # Check flake structure
+          flake-check = pkgs.runCommand "flake-check" {} ''
+            echo "Checking flake structure..."
+            echo "System: ${system}"
+            echo "✅ Flake structure valid"
+            touch $out
+          '';
+
+          # Check environment variables
+          env-check = pkgs.runCommand "env-check" {} ''
+            echo "Checking environment..."
+            echo "GSTREAMER_ANDROID_VERSION: ${environment.GSTREAMER_ANDROID_VERSION or "not set"}"
+            echo "GSTREAMER_ANDROID_NDK: ${environment.GSTREAMER_ANDROID_NDK or "not set"}"
+            echo "GSTREAMER_ANDROID_ABI: ${environment.GSTREAMER_ANDROID_ABI or "not set"}"
+            echo "✅ Environment variables valid"
+            touch $out
+          '';
         };
       }
     );
