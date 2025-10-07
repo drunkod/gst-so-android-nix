@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  check:
+    name: Nix Flake Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Install Nix
+        uses: cachix/install-nix-action@v26
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            allow-unfree = true
+
+      - name: 🔍 Flake check
+        run: nix flake check --show-trace
+
+      - name: 📋 Show flake info
+        run: |
+          nix flake show
+          nix flake metadata
+
+  format:
+    name: Check Formatting
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Install Nix
+        uses: cachix/install-nix-action@v26
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: 🎨 Check Nix formatting
+        run: |
+          nix fmt -- --check . || echo "Run 'nix fmt' to format Nix files"
+        continue-on-error: true
+
+  evaluate:
+    name: Evaluate Flake
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Install Nix
+        uses: cachix/install-nix-action@v26
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            allow-unfree = true
+
+      - name: 🔍 Evaluate packages
+        run: |
+          echo "::group::Available packages"
+          nix eval .#packages.x86_64-linux --apply builtins.attrNames
+          echo "::endgroup::"
+
+          echo "::group::Available apps"
+          nix eval .#apps.x86_64-linux --apply builtins.attrNames
+          echo "::endgroup::"
+
+          echo "::group::Config values"
+          echo "GStreamer Version: $(nix eval .#gstreamerAndroid.config.gstreamerVersion --raw)"
+          echo "NDK Version: $(nix eval .#gstreamerAndroid.config.ndkVersion --raw)"
+          echo "Target ABI: $(nix eval .#gstreamerAndroid.config.targetAbi --raw)"
+          echo "::endgroup::"
