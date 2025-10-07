@@ -28,7 +28,6 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = true
-            allow-unfree = true
 
       - name: 🗄️ Setup Cachix (Optional)
         uses: cachix/cachix-action@v14
@@ -88,7 +87,7 @@ jobs:
           cat > artifacts/build-info.txt << EOF
           GStreamer Android Build
           =======================
-          Version: $(nix eval .#gstreamerAndroid.config.gstreamerVersion --raw)
+          Version: 1.26.6
           ABI: ${{ matrix.abi }}
           NDK: r25c
           Platform: android-21
@@ -133,7 +132,6 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = true
-            allow-unfree = true
 
       - name: 🧪 Test development shell
         run: |
