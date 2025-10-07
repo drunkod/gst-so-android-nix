@@ -28,7 +28,6 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = true
-            allow-unfree = true
 
       - name: 🗄️ Setup Cachix (Optional)
         uses: cachix/cachix-action@v14
@@ -133,7 +132,6 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = true
-            allow-unfree = true
 
       - name: 🧪 Test development shell
         run: |
