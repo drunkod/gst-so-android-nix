@@ -4,6 +4,8 @@
 lib.mkMerge [
   gstreamerAndroid.env
   {
-    # Add any additional env vars here
+    # Fix disk space issues - use home directory for builds
+    TMPDIR = "/home/user/tmp";
+    XDG_CACHE_HOME = "/home/user/.cache";
   }
 ]

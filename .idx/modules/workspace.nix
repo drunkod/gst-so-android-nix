@@ -4,6 +4,12 @@
 {
   idx.workspace = {
     onCreate = {
+      # Create directories for temp and cache
+      setup-dirs = ''
+        mkdir -p ~/tmp
+        mkdir -p ~/.cache/nix
+      '';
+      
       welcome = ''
         echo "╔═══════════════════════════════════════════════════╗"
         echo "║  🎨 Slint Android Development Environment        ║"
