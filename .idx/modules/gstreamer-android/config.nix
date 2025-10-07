@@ -15,5 +15,5 @@
     "https://gstreamer.freedesktop.org/data/pkg/android/${version}/gstreamer-1.0-android-universal-${version}.tar.xz";
 
   # GStreamer tarball hash
-  gstreamerSha256 = "sha256-mP8r4LMXqJ76nKZMYH6zBUhKaDmo7BKEsu0zxi2mm6Q=";
+  gstreamerSha256 = "sha256-G+BZvB3plM6LIbZ5lwbjX3Nehh3WcqnHy+DgpyfgPWo=";
 }
