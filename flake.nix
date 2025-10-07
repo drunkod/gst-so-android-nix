@@ -8,7 +8,20 @@
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+    let
+      # Overlays at top level (not per-system)
+      overlays = {
+        default = final: prev: {
+          gstreamer-android = self.packages.${final.system}.gstreamer-android or null;
+        };
+      };
+
+    in
+    {
+      # Expose overlays at top level
+      inherit overlays;
+
+    } // flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
@@ -20,13 +33,16 @@
 
         lib = pkgs.lib;
 
-        # Import all overlays
-        overlays = import ./.idx/overlays/default.nix { inherit pkgs; };
+        # Import custom overlays (if they exist)
+        customOverlays =
+          if builtins.pathExists ./.idx/overlays/default.nix
+          then import ./.idx/overlays/default.nix { inherit pkgs; }
+          else [];
 
         # Apply overlays to pkgs
         extendedPkgs = pkgs.extend (
           self: super:
-            builtins.foldl' (acc: overlay: acc // overlay self super) {} overlays
+            builtins.foldl' (acc: overlay: acc // overlay self super) {} customOverlays
         );
 
         # Import GStreamer Android module
@@ -90,14 +106,11 @@
             ]);
 
             # Set environment variables
-            inherit (envVars) 
-              GSTREAMER_ANDROID_VERSION
-              GSTREAMER_ANDROID_NDK
-              GSTREAMER_ANDROID_ABI
-              GSTREAMER_ANDROID_ARTIFACTS;
-
-            # Shell hook
             shellHook = ''
+              ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: value:
+                "export ${name}=\"${toString value}\""
+              ) envVars)}
+
               echo "╔═══════════════════════════════════════════════════╗"
               echo "║  📱 GStreamer Android Development Environment     ║"
               echo "╚═══════════════════════════════════════════════════╝"
@@ -188,17 +201,28 @@
           '';
 
           # Check if scripts build
-          scripts-check = pkgs.runCommand "scripts-check" {} ''
+          scripts-check = pkgs.runCommand "scripts-check" {
+            buildInputs = [
+              self.packages.${system}.build-script
+              self.packages.${system}.test-script
+            ];
+          } ''
             echo "Checking scripts..."
-            ${self.packages.${system}.build-script}/bin/gst-android-build --help || true
-            ${self.packages.${system}.test-script}/bin/gst-android-test --help || true
+            command -v gst-android-build >/dev/null
+            command -v gst-android-test >/dev/null
+            echo "✅ All scripts found"
             touch $out
           '';
-        };
 
-        # Overlay for using in other flakes
-        overlays.default = final: prev: {
-          gstreamer-android = gstreamerAndroid.build;
+          # Check flake structure
+          flake-check = pkgs.runCommand "flake-check" {} ''
+            echo "Checking flake structure..."
+            echo "System: ${system}"
+            echo "Packages: ${toString (builtins.attrNames self.packages.${system})}"
+            echo "Apps: ${toString (builtins.attrNames self.apps.${system})}"
+            echo "✅ Flake structure valid"
+            touch $out
+          '';
         };
       }
     );
