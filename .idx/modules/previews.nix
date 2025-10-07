@@ -1,5 +1,5 @@
 # .idx/modules/previews.nix
-{ pkgs }:
+{ extendedPkgs }:
 
 {
   idx.previews = {

@@ -1,5 +1,5 @@
 # .idx/modules/workspace.nix
-{ pkgs }:
+{ extendedPkgs }:
 
 {
   idx.workspace = {

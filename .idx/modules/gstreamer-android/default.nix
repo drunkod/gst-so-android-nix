@@ -1,5 +1,5 @@
 # Main entry point - ties everything together
-{ pkgs }:
+{ pkgs, extendedPkgs }:
 
 let
   # Step 1: Load configuration (instant)

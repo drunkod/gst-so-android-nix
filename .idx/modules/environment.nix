@@ -1,18 +1,9 @@
-{ lib, extendedPkgs, gstreamerDaemon }:
+{ lib, extendedPkgs, gstreamerAndroid }:
 
-let
-  # Import GStreamer Android module
-  gstreamerAndroid = import ./gstreamer-android {
-    pkgs = extendedPkgs;
-    extendedPkgs = extendedPkgs;
-  };
-
-in
-  # Merge all environment variables
-  lib.mkMerge [
-    gstreamerDaemon.env
-    gstreamerAndroid.env
-    {
-      # Add any additional env vars here
-    }
-  ]
+# Merge all environment variables
+lib.mkMerge [
+  gstreamerAndroid.env
+  {
+    # Add any additional env vars here
+  }
+]
