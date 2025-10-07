@@ -11,9 +11,9 @@ let
   );
 
   # Import GStreamer Daemon module
-  gstreamerDaemon = import ./modules/gstreamer-daemon {
-    inherit pkgs extendedPkgs;
-  };
+  # gstreamerDaemon = import ./modules/gstreamer-daemon {
+  #   inherit pkgs extendedPkgs;
+  # };
 
   # Import GStreamer Android module (NEW)
   gstreamerAndroid = import ./modules/gstreamer-android {
@@ -22,11 +22,11 @@ let
 
   # Import other modules (they now use gstreamerAndroid internally)
   packages = import ./modules/packages.nix {
-    inherit extendedPkgs gstreamerDaemon;
+    inherit extendedPkgs gstreamerAndroid;
   };
 
   environment = import ./modules/environment.nix {
-    inherit lib extendedPkgs gstreamerDaemon;
+    inherit lib extendedPkgs gstreamerAndroid;
   };
 
   previews = import ./modules/previews.nix {
