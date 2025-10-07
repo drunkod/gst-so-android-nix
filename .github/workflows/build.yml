@@ -16,7 +16,6 @@ jobs:
     strategy:
       matrix:
         abi: [arm64-v8a]  # Add more ABIs if needed: armeabi-v7a, x86, x86_64
-      fail-fast: false
 
     steps:
       - name: 📥 Checkout repository
@@ -88,7 +87,7 @@ jobs:
           cat > artifacts/build-info.txt << EOF
           GStreamer Android Build
           =======================
-          Version: 1.26.6
+          Version: $(nix eval .#gstreamerAndroid.config.gstreamerVersion --raw)
           ABI: ${{ matrix.abi }}
           NDK: r25c
           Platform: android-21
