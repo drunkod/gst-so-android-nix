@@ -24,7 +24,7 @@ jobs:
             allow-unfree = true
 
       - name: 🗄️ Setup Cachix
-        uses: cachix/cachix-action@v14
+        uses: cachix/cachix-action@v16
         with:
           name: gstreamer-android  # Replace with your cache name
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'

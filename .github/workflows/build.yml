@@ -67,7 +67,7 @@ jobs:
             keep-derivations = false
 
       - name: 🗄️ Setup Cachix
-        uses: cachix/cachix-action@v14
+        uses: cachix/cachix-action@v16
         with:
           name: gstreamer-android
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
