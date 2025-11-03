@@ -253,7 +253,7 @@ jobs:
           ls -lh release/
 
       - name: 🚀 Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: release/*.tar.gz
           body: |
